@@ -651,7 +651,7 @@ function enterApp(){
   document.getElementById("page-login").style.display="none";
   document.getElementById("page-app").style.display="";
   activeTab = isAdmin ? "admin" : "pronosticos";
-  _lastHash = stateHash(S);
+  _lastHash = stateHash(S) + "_0";
   renderApp();
 }
 
@@ -747,6 +747,18 @@ function buildStageForm(stageId){
 
 async function savePron(){
   await persistForecasts();
+  // reload config from storage so user sees latest admin changes
+  try{
+    const rc = await window.storage.get("prode_config", true).catch(()=>null);
+    if(rc && rc.value){
+      const config = JSON.parse(rc.value);
+      S.enabled       = config.enabled       || S.enabled;
+      S.results       = config.results       || S.results;
+      S.knockoutTeams = config.knockoutTeams || S.knockoutTeams;
+      _lastHash = stateHash(config) + "_" + JSON.stringify(S.forecasts).length;
+    }
+  } catch(e){}
+  renderMainContent();
   const m = document.getElementById("pron-msg");
   if(m){ m.style.display="block"; setTimeout(()=>m.style.display="none",2200); }
 }
@@ -798,7 +810,9 @@ function buildAdmin(){
       </label>
     </div>`;
   });
-  html += `</div>`;
+  html += `<button class="btn primary full" style="margin-top:12px" onclick="applyStages()">🚀 Aplicar cambios</button>
+    <div id="stages-msg" class="alert success save-msg" style="margin-top:10px">✓ Cambios aplicados — los usuarios ya pueden ver las etapas</div>
+  </div>`;
 
   // Resultados
   html += `<div class="card"><div class="card-title">Cargar resultados</div>`;
@@ -883,13 +897,20 @@ async function saveResults(){
     if(inp.value) S.knockoutTeams[inp.dataset.kt]=inp.value;
   });
   await persistConfig();
+  renderMainContent();
   const m=document.getElementById("res-msg");
   if(m){m.style.display="block";setTimeout(()=>m.style.display="none",2200);}
 }
 
-async function toggleStage(id,val){
+function toggleStage(id,val){
   S.enabled[id]=val;
+}
+
+async function applyStages(){
   await persistConfig();
+  const m=document.getElementById("stages-msg");
+  if(m){m.style.display="block";setTimeout(()=>m.style.display="none",3000);}
+  renderMainContent();
 }
 
 // ── VER PRONÓSTICOS ───────────────────────────────────────────────────────────
@@ -959,7 +980,7 @@ let _lastHash = "";
 function stateHash(s){ return JSON.stringify(s.enabled)+JSON.stringify(Object.keys(s.results||{})).length; }
 
 async function pollState(){
-  if(!currentUser) return;
+  if(!currentUser || isAdmin) return; // admin no necesita poll, el escribe
   try{
     const [rc, rf] = await Promise.all([
       window.storage.get("prode_config", true).catch(()=>null),
@@ -968,17 +989,18 @@ async function pollState(){
     const config    = rc && rc.value ? JSON.parse(rc.value) : null;
     const forecasts = rf && rf.value ? JSON.parse(rf.value) : null;
     if(!config) return;
-    const hash = stateHash(config);
-    if(hash !== _lastHash || forecasts){
-      const myFc = S.forecasts[currentUser]||{};
-      S.enabled       = config.enabled       || S.enabled;
-      S.results       = config.results       || S.results;
-      S.knockoutTeams = config.knockoutTeams || S.knockoutTeams;
-      if(forecasts) S.forecasts = forecasts;
-      if(!isAdmin) S.forecasts[currentUser] = myFc;
-      _lastHash = hash;
-      renderMainContent();
-    }
+    const configHash = stateHash(config);
+    const fcHash = JSON.stringify(forecasts).length;
+    const fullHash = configHash + "_" + fcHash;
+    if(fullHash === _lastHash) return; // nada cambio
+    const myFc = S.forecasts[currentUser]||{};
+    S.enabled       = config.enabled       || S.enabled;
+    S.results       = config.results       || S.results;
+    S.knockoutTeams = config.knockoutTeams || S.knockoutTeams;
+    if(forecasts) S.forecasts = forecasts;
+    S.forecasts[currentUser] = myFc; // preservar mis cambios no guardados
+    _lastHash = fullHash;
+    renderMainContent();
   } catch(e){}
 }
 
