@@ -506,15 +506,34 @@ let pendingPlayer = null;
 // ── STORAGE ───────────────────────────────────────────────────────────────────
 async function loadState(){
   try{
-    const r = await window.storage.get("prode26_v2", true);
-    if(r && r.value) S = JSON.parse(r.value);
-    else S = initState();
+    const [rc, rf] = await Promise.all([
+      window.storage.get("prode_config", true).catch(()=>null),
+      window.storage.get("prode_forecasts", true).catch(()=>null),
+    ]);
+    const config    = rc && rc.value ? JSON.parse(rc.value) : {};
+    const forecasts = rf && rf.value ? JSON.parse(rf.value) : {};
+    S = {
+      enabled:       config.enabled       || {groups:false,r16:false,qf:false,sf:false,final:false},
+      results:       config.results       || {},
+      knockoutTeams: config.knockoutTeams || {},
+      forecasts,
+    };
   } catch(e){ S = initState(); }
 }
 
 async function persistState(){
-  try{ await window.storage.set("prode26_v2", JSON.stringify(S), true); }
-  catch(e){ console.error("save error",e); }
+  await Promise.all([
+    window.storage.set("prode_config",    JSON.stringify({enabled:S.enabled,results:S.results,knockoutTeams:S.knockoutTeams}), true).catch(()=>{}),
+    window.storage.set("prode_forecasts", JSON.stringify(S.forecasts), true).catch(()=>{}),
+  ]);
+}
+
+async function persistConfig(){
+  await window.storage.set("prode_config", JSON.stringify({enabled:S.enabled,results:S.results,knockoutTeams:S.knockoutTeams}), true).catch(()=>{});
+}
+
+async function persistForecasts(){
+  await window.storage.set("prode_forecasts", JSON.stringify(S.forecasts), true).catch(()=>{});
 }
 
 function initState(){
@@ -632,6 +651,7 @@ function enterApp(){
   document.getElementById("page-login").style.display="none";
   document.getElementById("page-app").style.display="";
   activeTab = isAdmin ? "admin" : "pronosticos";
+  _lastHash = stateHash(S);
   renderApp();
 }
 
@@ -726,7 +746,7 @@ function buildStageForm(stageId){
 }
 
 async function savePron(){
-  await persistState();
+  await persistForecasts();
   const m = document.getElementById("pron-msg");
   if(m){ m.style.display="block"; setTimeout(()=>m.style.display="none",2200); }
 }
@@ -862,14 +882,14 @@ async function saveResults(){
   document.querySelectorAll(".kt-inp").forEach(inp=>{
     if(inp.value) S.knockoutTeams[inp.dataset.kt]=inp.value;
   });
-  await persistState();
+  await persistConfig();
   const m=document.getElementById("res-msg");
   if(m){m.style.display="block";setTimeout(()=>m.style.display="none",2200);}
 }
 
 async function toggleStage(id,val){
   S.enabled[id]=val;
-  await persistState();
+  await persistConfig();
 }
 
 // ── VER PRONÓSTICOS ───────────────────────────────────────────────────────────
@@ -933,6 +953,36 @@ function bindInputListeners(){
     });
   });
 }
+
+// ── POLLING: refresca estado compartido cada 5 segundos ──────────────────────
+let _lastHash = "";
+function stateHash(s){ return JSON.stringify(s.enabled)+JSON.stringify(Object.keys(s.results||{})).length; }
+
+async function pollState(){
+  if(!currentUser) return;
+  try{
+    const [rc, rf] = await Promise.all([
+      window.storage.get("prode_config", true).catch(()=>null),
+      window.storage.get("prode_forecasts", true).catch(()=>null),
+    ]);
+    const config    = rc && rc.value ? JSON.parse(rc.value) : null;
+    const forecasts = rf && rf.value ? JSON.parse(rf.value) : null;
+    if(!config) return;
+    const hash = stateHash(config);
+    if(hash !== _lastHash || forecasts){
+      const myFc = S.forecasts[currentUser]||{};
+      S.enabled       = config.enabled       || S.enabled;
+      S.results       = config.results       || S.results;
+      S.knockoutTeams = config.knockoutTeams || S.knockoutTeams;
+      if(forecasts) S.forecasts = forecasts;
+      if(!isAdmin) S.forecasts[currentUser] = myFc;
+      _lastHash = hash;
+      renderMainContent();
+    }
+  } catch(e){}
+}
+
+setInterval(pollState, 5000);
 
 // ── SHORTCUTS para sub-tabs via window._xxx ───────────────────────────────────
 window.addEventListener("click",()=>{
