@@ -435,6 +435,34 @@
 </div>
 
 <script>
+// ── FIREBASE STORAGE ADAPTER ──────────────────────────────────────────────────
+// Reemplaza window.storage (API exclusiva de Claude) para funcionar en GitHub Pages
+const FIREBASE_URL = "https://prode2026-53dd8-default-rtdb.firebaseio.com";
+
+if (!window.storage) {
+  window.storage = {
+    get: async function(key) {
+      try {
+        const r = await fetch(`${FIREBASE_URL}/${key}.json`);
+        if (!r.ok) return null;
+        const text = await r.text();
+        if (!text || text === 'null') return null;
+        const value = JSON.parse(text);
+        return value !== null ? { value } : null;
+      } catch(e) { return null; }
+    },
+    set: async function(key, value) {
+      try {
+        await fetch(`${FIREBASE_URL}/${key}.json`, {
+          method: 'PUT',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(value)
+        });
+      } catch(e) {}
+    }
+  };
+}
+
 // ── DATA ──────────────────────────────────────────────────────────────────────
 const PLAYERS = ["Dorita","Horacio","Leticia","Tomás","Ignacio","Sol","Ciro","Cecilia","Andrés Rodriguez","Federico","Violeta","Gabriel","Maica","Priscila","Rafael","Nehuén","Analía","Luichi","Lucía","Pilar","Mariano","Ezequiel","Joaquín","Valeria","Andrés Carbonel","Vera"];
 const ADMIN_PASS = "mundial2026";
